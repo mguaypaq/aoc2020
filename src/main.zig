@@ -2,16 +2,19 @@ const std = @import("std");
 const stdout = std.io.getStdOut().writer();
 
 pub fn main() !void {
-    for (input) |num| {
-        if (num > year) continue;
-        const complement = year - num;
-        if (seen[complement]) try stdout.print("{}\n", .{complement * num});
-        seen[num] = true;
+    for (input) |a, index| {
+        if (a > year) continue;
+        if (prod_of_sum[year - a]) |prod| {
+            try stdout.print("{}\n", .{a * prod});
+        }
+        for (input[0..index]) |b| {
+            if (a + b <= year) prod_of_sum[a + b] = a * b;
+        }
     }
 }
 
 const year = 2020;
-var seen = [_]bool{false} ** (year + 1);
+var prod_of_sum = [_]?u32{null} ** (year + 1);
 const input = [_]u32{
     1883,
     1543,
