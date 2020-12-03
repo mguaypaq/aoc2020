@@ -22,6 +22,7 @@ pub fn main() !void {
     var policy_high: u8 = undefined;
     var policy_char: u8 = undefined;
     var policy_char_count: u8 = undefined;
+    var password_pos: u8 = undefined;
     var valid_count: u32 = 0;
 
     while (reader.readByte()) |char| switch (parsing_state) {
@@ -70,18 +71,21 @@ pub fn main() !void {
         State.after_policy_char_2 => {
             if (char != ' ') return error.BadFormat;
             policy_char_count = 0;
+            password_pos = 1;
             parsing_state = State.in_password;
         },
         State.in_password => switch (char) {
             'a'...'z' => {
-                if (char == policy_char) policy_char_count += 1;
+                if ((password_pos == policy_low or password_pos == policy_high) and char == policy_char) policy_char_count += 1;
+                password_pos += 1;
             },
             '\n' => {
-                if (policy_low <= policy_char_count and policy_char_count <= policy_high) valid_count += 1;
+                if (policy_char_count == 1) valid_count += 1;
                 policy_low = undefined;
                 policy_high = undefined;
                 policy_char = undefined;
                 policy_char_count = undefined;
+                password_pos = undefined;
                 parsing_state = State.start_of_line;
             },
             else => return error.BadFormat,
