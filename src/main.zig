@@ -11,19 +11,19 @@ pub fn main() !void {
     defer text.deinit();
     try file.reader().readAllArrayList(&text, 1024 * 1024);
 
+    var seen = [_]bool{false} ** (1 << 10);
+
     var boarding_passes = std.mem.tokenize(text.items, "\n");
-    var highest_seat_id: ?u16 = null;
     while (boarding_passes.next()) |boarding_pass| {
         const seat_id = try readSeatId(boarding_pass);
-        highest_seat_id = max(highest_seat_id, seat_id);
+        seen[seat_id] = true;
     }
 
-    try std.io.getStdOut().writer().print("{}\n", .{highest_seat_id});
-}
+    const pattern = [_]bool{true, false, true};
+    const maybe_pos = std.mem.indexOf(bool, &seen, &pattern);
+    const seat_id = if (maybe_pos) |pos| (pos + 1) else return error.SeatNotFound;
 
-fn max(maybe_a: ?u16, b: u16) ?u16 {
-    if (maybe_a) |a| if (a > b) return a;
-    return b;
+    try std.io.getStdOut().writer().print("{}\n", .{seat_id});
 }
 
 fn readSeatId(buf: []const u8) error{BadSeatId}!u16 {
