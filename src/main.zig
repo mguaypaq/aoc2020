@@ -19,15 +19,17 @@ fn sumCounts(buf: []const u8) error{BadFormat}!u32 {
     var sum: u32 = 0;
     var groups = std.mem.split(buf, "\n\n");
     while (groups.next()) |group| {
-        var seen = [_]bool{false} ** 26;
-        for (group) |char| switch (char) {
-            'a'...'z' => seen[char - 'a'] = true,
-            '\n' => continue,
-            else => return error.BadFormat,
-        };
-        for (seen) |yes| if (yes) {
-            sum += 1;
-        };
+        var group_qs: u26 = ~@as(u26, 0);
+        var persons = std.mem.tokenize(group, "\n");
+        while (persons.next()) |person| {
+            var person_qs: u26 = 0;
+            for (person) |char| switch (char) {
+                'a'...'z' => person_qs |= @as(u26, 1) << @intCast(u5, char - 'a'),
+                else => return error.BadFormat,
+            };
+            group_qs &= person_qs;
+        }
+        sum += @popCount(u26, group_qs);
     }
     return sum;
 }
@@ -52,5 +54,5 @@ test "sumCounts" {
         \\b
     ;
 
-    expectEqual(@as(u32, 11), try sumCounts(text));
+    expectEqual(@as(u32, 6), try sumCounts(text));
 }
