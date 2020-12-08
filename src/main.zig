@@ -20,7 +20,7 @@ pub fn main() !void {
     try std.io.getStdOut().writer().print("{}\n", .{shiny_count});
 }
 
-test "example" {
+test "example 1" {
     const allocator = std.testing.allocator;
     const text =
         \\light red bags contain 1 bright white bag, 2 muted yellow bags.
@@ -40,10 +40,31 @@ test "example" {
 
     const rules = try parser.parseRules();
     const shiny_count = try processRules(allocator, rules);
-    std.testing.expectEqual(@as(usize, 4), shiny_count);
+    std.testing.expectEqual(@as(?u64, 32), shiny_count);
 }
 
-fn processRules(allocator: *Allocator, rules: []Rule) !usize {
+test "example 2" {
+    const allocator = std.testing.allocator;
+    const text =
+        \\shiny gold bags contain 2 dark red bags.
+        \\dark red bags contain 2 dark orange bags.
+        \\dark orange bags contain 2 dark yellow bags.
+        \\dark yellow bags contain 2 dark green bags.
+        \\dark green bags contain 2 dark blue bags.
+        \\dark blue bags contain 2 dark violet bags.
+        \\dark violet bags contain no other bags.
+        \\
+    ;
+
+    var parser = Parser.init(allocator, text);
+    defer parser.deinit();
+
+    const rules = try parser.parseRules();
+    const shiny_count = try processRules(allocator, rules);
+    std.testing.expectEqual(@as(?u64, 126), shiny_count);
+}
+
+fn processRules(allocator: *Allocator, rules: []Rule) !?u64 {
     var dict = std.StringHashMap(*Rule).init(allocator);
     defer dict.deinit();
     {
@@ -63,60 +84,65 @@ fn processRules(allocator: *Allocator, rules: []Rule) !usize {
         .BeforeVisit => {
             rule.status = .DuringVisit;
             try stack.append(rule);
-            for (rule.tail.items) |colour| {
-                const child = dict.get(colour) orelse return error.MissingRule;
+            for (rule.tail.items) |tail_item| {
+                const child = dict.get(tail_item.colour) orelse return error.MissingRule;
                 if (child.status == .BeforeVisit) try stack.append(child);
             }
         },
         .DuringVisit => {
-            rule.status = if (std.mem.eql(u8, rule.head, "shiny gold")) .Shiny else .Dull;
-            for (rule.tail.items) |colour| {
-                const child = dict.get(colour) orelse unreachable;
+            var bag_count: u64 = 1;
+            for (rule.tail.items) |tail_item| {
+                const child = dict.get(tail_item.colour) orelse unreachable;
                 switch (child.status) {
                     .BeforeVisit => unreachable,
-                    .DuringVisit, .Cyclic => {
-                        rule.status = .Cyclic;
+                    .DuringVisit => {
+                        rule.bag_count = null;
                         break;
                     },
-                    .Shiny => rule.status = .Shiny,
-                    .Dull => continue,
+                    .AfterVisit => {
+                        if (child.bag_count) |n| {
+                            bag_count += tail_item.count * n;
+                        } else {
+                            rule.bag_count = null;
+                            break;
+                        }
+                    },
                 }
             }
+            rule.status = .AfterVisit;
+            rule.bag_count = bag_count;
         },
-        .Shiny, .Dull, .Cyclic => continue,
+        .AfterVisit => continue,
     };
 
-    if (dict.get("shiny gold")) |rule| switch (rule.status) {
-        .BeforeVisit, .DuringVisit, .Dull => unreachable,
-        .Shiny => {},
-        .Cyclic => return 0,
-    };
-    var shiny_count: usize = 0;
-    for (rules) |rule| {
-        if (rule.status == .Shiny) shiny_count += 1;
-    }
-    return shiny_count - 1;
+    const shiny_rule = dict.get("shiny gold") orelse return error.MissingRule;
+    return if (shiny_rule.bag_count) |bag_count| (bag_count - 1) else null;
 }
 
 /// The relevant information for a rule, including its graph traversal state.
 const Rule = struct {
     head: []const u8,
-    tail: ArrayList([]const u8),
+    tail: ArrayList(TailItem),
     status: Status,
+    bag_count: ?u64,
+
+    const TailItem = struct {
+        count: u64,
+        colour: []const u8,
+    };
 
     const Status = enum {
         BeforeVisit,
         DuringVisit,
-        Shiny,
-        Dull,
-        Cyclic,
+        AfterVisit,
     };
 
     fn init(allocator: *Allocator, head: []const u8) Rule {
         return Rule{
             .head = head,
-            .tail = ArrayList([]const u8).init(allocator),
+            .tail = ArrayList(TailItem).init(allocator),
             .status = .BeforeVisit,
+            .bag_count = undefined,
         };
     }
 
@@ -209,17 +235,17 @@ const Parser = struct {
     }
 
     /// A string like "1 bright white bag" or "2 muted yellow bags".
-    /// Returns the slice containing the colour.
-    fn parseContent(self: *Self) Fail![]const u8 {
+    /// Returns a TailItem containing the count and the colour.
+    fn parseContent(self: *Self) Fail!Rule.TailItem {
         const start = self.index;
         errdefer self.index = start;
 
-        const singular: bool = (try self.parseNumber(u32)) == 1;
+        const count = try self.parseNumber(u64);
         try self.parseLiteral(" ");
         const colour = try self.parseColour();
-        try self.parseLiteral(if (singular) " bag" else " bags");
+        try self.parseLiteral(if (count == 1) " bag" else " bags");
 
-        return colour;
+        return Rule.TailItem{ .count = count, .colour = colour };
     }
 
     /// An entire line containing a valid rule.
@@ -235,8 +261,8 @@ const Parser = struct {
 
         try self.parseLiteral(" bags contain ");
         self.parseLiteral("no other bags.\n") catch while (true) {
-            const colour = try self.parseContent();
-            try rule.tail.append(colour);
+            const tail_item = try self.parseContent();
+            try rule.tail.append(tail_item);
             self.parseLiteral(", ") catch {
                 try self.parseLiteral(".\n");
                 break;
