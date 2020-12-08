@@ -1,4 +1,5 @@
 const std = @import("std");
+const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 
 pub fn main() !void {
@@ -7,15 +8,20 @@ pub fn main() !void {
     const allocator = &arena.allocator;
     const file = try std.fs.cwd().openFile("input.txt", .{});
     defer file.close();
-    var text = std.ArrayList(u8).init(allocator);
+    var text = ArrayList(u8).init(allocator);
     defer text.deinit();
     try file.reader().readAllArrayList(&text, 1024 * 1024);
 
-    const shiny_count = try processRules(allocator, text.items);
-    std.io.getStdOut().writer().print("{}\n", .{shiny_count});
+    var parser = Parser.init(allocator, text.items);
+    defer parser.deinit();
+
+    const rules = try parser.parseRules();
+    const shiny_count = try processRules(allocator, rules);
+    try std.io.getStdOut().writer().print("{}\n", .{shiny_count});
 }
 
 test "example" {
+    const allocator = std.testing.allocator;
     const text =
         \\light red bags contain 1 bright white bag, 2 muted yellow bags.
         \\dark orange bags contain 3 bright white bags, 4 muted yellow bags.
@@ -28,15 +34,74 @@ test "example" {
         \\dotted black bags contain no other bags.
         \\
     ;
-    var parser = Parser.init(std.testing.allocator, text);
+
+    var parser = Parser.init(allocator, text);
+    defer parser.deinit();
+
     const rules = try parser.parseRules();
-    defer rules.deinit();
+    const shiny_count = try processRules(allocator, rules);
+    std.testing.expectEqual(@as(usize, 4), shiny_count);
+}
+
+fn processRules(allocator: *Allocator, rules: []Rule) !usize {
+    var dict = std.StringHashMap(*Rule).init(allocator);
+    defer dict.deinit();
+    {
+        @setRuntimeSafety(true);
+        try dict.ensureCapacity(@intCast(u32, rules.len));
+    }
+    for (rules) |*rule| {
+        const existing = try dict.fetchPut(rule.head, rule);
+        if (existing != null) return error.RuleCollision;
+    }
+
+    var stack = try ArrayList(*Rule).initCapacity(allocator, rules.len);
+    defer stack.deinit();
+    for (rules) |*rule| try stack.append(rule);
+
+    while (stack.popOrNull()) |rule| switch (rule.status) {
+        .BeforeVisit => {
+            rule.status = .DuringVisit;
+            try stack.append(rule);
+            for (rule.tail.items) |colour| {
+                const child = dict.get(colour) orelse return error.MissingRule;
+                if (child.status == .BeforeVisit) try stack.append(child);
+            }
+        },
+        .DuringVisit => {
+            rule.status = if (std.mem.eql(u8, rule.head, "shiny gold")) .Shiny else .Dull;
+            for (rule.tail.items) |colour| {
+                const child = dict.get(colour) orelse unreachable;
+                switch (child.status) {
+                    .BeforeVisit => unreachable,
+                    .DuringVisit, .Cyclic => {
+                        rule.status = .Cyclic;
+                        break;
+                    },
+                    .Shiny => rule.status = .Shiny,
+                    .Dull => continue,
+                }
+            }
+        },
+        .Shiny, .Dull, .Cyclic => continue,
+    };
+
+    if (dict.get("shiny gold")) |rule| switch (rule.status) {
+        .BeforeVisit, .DuringVisit, .Dull => unreachable,
+        .Shiny => {},
+        .Cyclic => return 0,
+    };
+    var shiny_count: usize = 0;
+    for (rules) |rule| {
+        if (rule.status == .Shiny) shiny_count += 1;
+    }
+    return shiny_count - 1;
 }
 
 /// The relevant information for a rule, including its graph traversal state.
 const Rule = struct {
     head: []const u8,
-    tail: std.ArrayList([]const u8),
+    tail: ArrayList([]const u8),
     status: Status,
 
     const Status = enum {
@@ -50,7 +115,7 @@ const Rule = struct {
     fn init(allocator: *Allocator, head: []const u8) Rule {
         return Rule{
             .head = head,
-            .tail = std.ArrayList([]const u8).init(allocator),
+            .tail = ArrayList([]const u8).init(allocator),
             .status = .BeforeVisit,
         };
     }
@@ -64,17 +129,24 @@ const Parser = struct {
     const Self = @This();
 
     buf: []const u8,
-    index: usize,
+    index: usize = 0,
+    rules: ArrayList(Rule),
     allocator: *Allocator,
 
     const Fail = error{ParseFail};
 
     fn init(allocator: *Allocator, buf: []const u8) Self {
+        const rules = ArrayList(Rule).init(allocator);
         return Self{
             .buf = buf,
-            .index = 0,
+            .rules = rules,
             .allocator = allocator,
         };
+    }
+
+    fn deinit(self: Self) void {
+        for (self.rules.items) |rule| rule.deinit();
+        self.rules.deinit();
     }
 
     /// A non-empty string of lowercase letters.
@@ -175,19 +247,14 @@ const Parser = struct {
 
     /// Parse a sequence of lines containing valid rules.
     /// Fails if there are leftover characters.
-    /// On success, caller owns the allocated ArrayList(Rule).
-    fn parseRules(self: *Self) !std.ArrayList(Rule) {
+    fn parseRules(self: *Self) ![]Rule {
         const start = self.index;
         errdefer self.index = start;
 
-        var rules = std.ArrayList(Rule).init(self.allocator);
-        errdefer rules.deinit();
-
         while (self.index < self.buf.len) {
             const rule = try self.parseRule();
-            defer rule.deinit();
-            try rules.append(rule);
+            try self.rules.append(rule);
         }
-        return rules;
+        return self.rules.items;
     }
 };
