@@ -25,18 +25,14 @@ pub fn main() !void {
         }
     }.lessThan);
 
-    var singles: usize = 0;
-    var triples: usize = 1;
-    var input_joltage: u8 = 0;
-    for (adapters.items) |output_joltage| {
-        switch (output_joltage - input_joltage) {
-            1 => singles += 1,
-            2 => {},
-            3 => triples += 1,
-            else => return error.WrongJoltage,
-        }
-        input_joltage = output_joltage;
+    var ways = [_]u64{0} ** 256;
+    ways[0] = 1;
+    for (adapters.items) |joltage| {
+        if (joltage >= 3) ways[joltage] += ways[joltage - 3];
+        if (joltage >= 2) ways[joltage] += ways[joltage - 2];
+        if (joltage >= 1) ways[joltage] += ways[joltage - 1];
     }
+    const max_joltage = adapters.items[adapters.items.len - 1];
 
-    try std.io.getStdOut().writer().print("{}\n", .{singles * triples});
+    try std.io.getStdOut().writer().print("{}\n", .{ways[max_joltage]});
 }
