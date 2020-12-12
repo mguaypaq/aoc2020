@@ -14,12 +14,12 @@ pub fn main() !void {
     defer code.deinit();
 
     try parse(&code, text.items);
-    const acc = try run(code.items);
+    const acc = fix(code.items);
 
     try std.io.getStdOut().writer().print("{}\n", .{acc});
 }
 
-test "example" {
+test "example 1" {
     const text =
         \\nop +0
         \\acc +1
@@ -35,17 +35,37 @@ test "example" {
     var code = ArrayList(Instruction).init(std.testing.allocator);
     defer code.deinit();
     try parse(&code, text);
-    const acc = try run(code.items);
-    std.testing.expectEqual(@as(i32, 5), acc);
+    std.testing.expectEqual(@as(?i32, null), run(code.items));
+}
+
+test "example 2" {
+    const text =
+        \\nop +0
+        \\acc +1
+        \\jmp +4
+        \\acc +3
+        \\jmp -3
+        \\acc -99
+        \\acc +1
+        \\jmp -4
+        \\acc +6
+        \\
+    ;
+    var code = ArrayList(Instruction).init(std.testing.allocator);
+    defer code.deinit();
+    try parse(&code, text);
+    const acc = try fix(code.items);
+    std.testing.expectEqual(@as(i32, 8), acc);
 }
 
 const Instruction = struct { op: Operation, arg: i32, seen: bool = false };
 const Operation = enum { acc, jmp, nop };
 
-fn run(code: []Instruction) !i32 {
+fn run(code: []Instruction) ?i32 {
     var pc: usize = 0;
     var acc: i32 = 0;
-    while (!code[pc].seen) {
+    while (pc != code.len) {
+        if (code[pc].seen) return null;
         code[pc].seen = true;
         switch (code[pc].op) {
             .acc => {
@@ -61,6 +81,23 @@ fn run(code: []Instruction) !i32 {
         }
     }
     return acc;
+}
+
+fn fix(code: []Instruction) !i32 {
+    for (code) |*inst| {
+        inst.op = switch (inst.op) {
+            .acc => continue,
+            .jmp => .nop,
+            .nop => .jmp,
+        };
+        for (code) |*i| i.seen = false;
+        if (run(code)) |acc| return acc;
+        inst.op = switch (inst.op) {
+            .acc => unreachable,
+            .jmp => .nop,
+            .nop => .jmp,
+        };
+    } else return error.UnfixableCode;
 }
 
 fn parse(output: *ArrayList(Instruction), input: []const u8) !void {
