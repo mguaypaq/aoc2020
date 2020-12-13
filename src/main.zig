@@ -29,7 +29,7 @@ pub fn main() !void {
         occupied += 1;
     };
 
-    try std.io.getStdOut().writer().print("{}\n{}\n", .{even, occupied});
+    try std.io.getStdOut().writer().print("{}\n", .{ occupied });
 }
 
 test "a few rounds" {
@@ -56,16 +56,16 @@ test "a few rounds" {
         \\#.######.#
         \\#.#####.##
         ,
-        \\#.LL.L#.##
-        \\#LLLLLL.L#
+        \\#.LL.LL.L#
+        \\#LLLLLL.LL
         \\L.L.L..L..
-        \\#LLL.LL.L#
-        \\#.LL.LL.LL
-        \\#.LLLL#.##
+        \\LLLL.LL.LL
+        \\L.LL.LL.LL
+        \\L.LLLLL.LL
         \\..L.L.....
-        \\#LLLLLLLL#
+        \\LLLLLLLLL#
         \\#.LLLLLL.L
-        \\#.#LLLL.##
+        \\#.LLLLL.L#
     };
     var allocator = std.testing.allocator;
     var even = try SeatingArea.init(allocator, round[0]);
@@ -146,15 +146,30 @@ const SeatingArea = struct {
         const offsets = [3]isize{ -1, 0, 1 };
         var count: u32 = 0;
         for (offsets) |row_offset| for (offsets) |col_offset| {
-            if (self.get(row + row_offset, col + col_offset) == '#') count += 1;
+            if (row_offset == 0 and col_offset == 0) continue;
+            var r = row + row_offset;
+            var c = col + col_offset;
+            while (self.get(r, c)) |char| {
+                switch (char) {
+                    '.' => {},
+                    'L' => break,
+                    '#' => {
+                        count += 1;
+                        break;
+                    },
+                    else => unreachable,
+                }
+                r += row_offset;
+                c += col_offset;
+            }
         };
         return count;
     }
 
-    fn get(self: Self, row: isize, col: isize) u8 {
-        if (row < 0 or self.pos.len <= row) return '.';
+    fn get(self: Self, row: isize, col: isize) ?u8 {
+        if (row < 0 or self.pos.len <= row) return null;
         const slice = self.pos[@intCast(usize, row)];
-        if (col < 0 or slice.len <= col) return '.';
+        if (col < 0 or slice.len <= col) return null;
         return slice[@intCast(usize, col)];
     }
 
