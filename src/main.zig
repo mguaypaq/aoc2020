@@ -19,30 +19,38 @@ pub fn main() !void {
     var memory = AutoHashMap(u64, u64).init(allocator);
     defer memory.deinit();
 
-    var or_mask = @as(u36, 0);
-    var and_mask = ~@as(u36, 0);
+    var or_mask: u36 = 0;
+    var float_mask: u36 = 0;
 
     var lines = mem.tokenize(text.items, "\n");
     while (lines.next()) |line| {
         if (mem.startsWith(u8, line, "mask = ")) {
             assert(line.len == 7 + 36);
             or_mask = 0;
-            and_mask = 0;
+            float_mask = 0;
             for (line[7..]) |char| {
                 or_mask <<= 1;
-                and_mask = and_mask << 1 | 1;
+                float_mask <<= 1;
                 switch (char) {
-                    '0' => and_mask ^= 1,
+                    '0' => {},
                     '1' => or_mask ^= 1,
-                    'X' => {},
+                    'X' => float_mask ^= 1,
                     else => unreachable,
                 }
             }
         } else if (mem.startsWith(u8, line, "mem[")) {
             const index = mem.indexOfPos(u8, line, 4, "] = ").?;
-            const address = try fmt.parseUnsigned(u36, line[4..index], 10);
+            var address = try fmt.parseUnsigned(u36, line[4..index], 10);
             const value = try fmt.parseUnsigned(u36, line[(index + 4)..], 10);
-            try memory.put(address, value | or_mask & and_mask);
+
+            address |= or_mask;
+            address &= ~float_mask;
+            var float = float_mask;
+            while (true) {
+                try memory.put(address | float, value);
+                if (float == 0) break;
+                float = (float - 1) & float_mask;
+            }
         } else unreachable;
     }
 
