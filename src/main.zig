@@ -1,24 +1,28 @@
 const std = @import("std");
-const ArrayList = std.ArrayList;
 
 const input = [_]usize{ 14, 1, 17, 0, 3, 20 };
+const target: usize = 30_000_000;
 
 pub fn main() !void {
-    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
-    defer arena.deinit();
+    var last_spoken = try std.heap.page_allocator.alloc(?usize, target);
+    defer std.heap.page_allocator.free(last_spoken);
+    std.mem.set(?usize, last_spoken, null);
 
-    var spoken = ArrayList(usize).init(&arena.allocator);
-    defer spoken.deinit();
-
-    for (input) |number| try spoken.append(number);
-    while (spoken.items.len < 2020) {
-        var index = spoken.items.len - 1;
-        const last = spoken.items[index];
-        try spoken.append(while (index > 0) {
-            index -= 1;
-            if (spoken.items[index] == last) break (spoken.items.len - 1 - index);
-        } else 0);
+    var time: usize = 0;
+    while (time < input.len - 1) : (time += 1) {
+        last_spoken[input[time]] = time;
     }
-
-    try std.io.getStdOut().writer().print("{}\n", .{spoken.items[2020 - 1]});
+    var next_number = input[time];
+    while (time < target - 1) {
+        if (last_spoken[next_number]) |last_time| {
+            last_spoken[next_number] = time;
+            next_number = time - last_time;
+            time += 1;
+        } else {
+            last_spoken[next_number] = time;
+            next_number = 0;
+            time += 1;
+        }
+    }
+    try std.io.getStdOut().writer().print("{}\n", .{next_number});
 }
