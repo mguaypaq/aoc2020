@@ -1,6 +1,8 @@
 const std = @import("std");
+const assert = std.debug.assert;
 
 pub fn main() !void {
+    // Figure out the values which are totally invalid.
     var is_invalid = [_]bool{true} ** 1000;
     for (fields) |field| {
         for (field.ranges) |range| {
@@ -8,19 +10,127 @@ pub fn main() !void {
         }
     }
 
-    var sum: usize = 0;
-    for (nearby_tickets) |ticket| {
+    // Is a (field index, ticket index) pair possible from what
+    // we've seen so far?
+    var matrix: Matrix = undefined;
+    set(&matrix, true);
+
+    // Start ruling out (field index, ticket index) pairs.
+    ticket: for (nearby_tickets) |ticket| {
+        // Entirely skip tickets which contain a totally invalid value.
         for (ticket) |value| {
-            if (is_invalid[value]) sum += value;
+            if (is_invalid[value]) continue :ticket;
+        }
+
+        for (fields) |field, field_index| {
+            for (ticket) |value, ticket_index| {
+                if (!field.valid(value)) {
+                    matrix[field_index][ticket_index] = false;
+                }
+            }
         }
     }
 
-    try std.io.getStdOut().writer().print("{}\n", .{sum});
+    // Now start deducing (field, ticket position) pairs.
+    var row_open = [_]bool{true} ** fields.len;
+    var col_open = [_]bool{true} ** fields.len;
+    while (true) {
+        var progress = false;
+        var index: usize = 0;
+        while (index < fields.len) : (index += 1) {
+            if (row_open[index])
+                if (unique_in_row(matrix, index)) |col| {
+                    assert(col_open[col]);
+                    const row = index;
+                    set_col(&matrix, col, false);
+                    matrix[row][col] = true;
+                    row_open[row] = false;
+                    col_open[col] = false;
+                    fields[row].ticket_index = col;
+                    progress = true;
+                };
+            if (col_open[index])
+                if (unique_in_col(matrix, index)) |row| {
+                    assert(row_open[row]);
+                    const col = index;
+                    set_row(&matrix, row, false);
+                    matrix[row][col] = true;
+                    row_open[row] = false;
+                    col_open[col] = false;
+                    fields[row].ticket_index = col;
+                    progress = true;
+                };
+        }
+        if (!progress) break;
+    }
+
+    var product: usize = 1;
+    for (fields) |field| {
+        if (std.mem.startsWith(u8, field.name, "departure ")) {
+            product *= your_ticket[field.ticket_index.?];
+        }
+    }
+    try std.io.getStdOut().writer().print("{}\n", .{product});
+}
+
+const Matrix = [fields.len][fields.len]bool;
+
+fn set(matrix: *Matrix, value: bool) void {
+    var row: usize = 0;
+    while (row < fields.len) : (row += 1) {
+        set_row(matrix, row, value);
+    }
+}
+
+fn set_row(matrix: *Matrix, row: usize, value: bool) void {
+    var col: usize = 0;
+    while (col < fields.len) : (col += 1) {
+        matrix[row][col] = value;
+    }
+}
+
+fn set_col(matrix: *Matrix, col: usize, value: bool) void {
+    var row: usize = 0;
+    while (row < fields.len) : (row += 1) {
+        matrix[row][col] = value;
+    }
+}
+
+fn unique_in_row(matrix: Matrix, row: usize) ?usize {
+    var first_col: usize = 0;
+    while (first_col < fields.len) : (first_col += 1) {
+        if (matrix[row][first_col]) break;
+    } else return null;
+    var other_col: usize = first_col + 1;
+    while (other_col < fields.len) : (other_col += 1) {
+        if (matrix[row][other_col]) return null;
+    } else return first_col;
+}
+
+fn unique_in_col(matrix: Matrix, col: usize) ?usize {
+    var first_row: usize = 0;
+    while (first_row < fields.len) : (first_row += 1) {
+        if (matrix[first_row][col]) break;
+    } else return null;
+    var other_row: usize = first_row + 1;
+    while (other_row < fields.len) : (other_row += 1) {
+        if (matrix[other_row][col]) return null;
+    } else return first_row;
 }
 
 const Range = struct { begin: usize, end: usize };
-const Field = struct { name: []const u8, ranges: [2]Range };
-const fields = [_]Field{
+const Field = struct {
+    name: []const u8,
+    ranges: [2]Range,
+    ticket_index: ?usize = null,
+
+    fn valid(self: @This(), value: usize) bool {
+        return for (self.ranges) |range| {
+            if (range.begin <= value and value <= range.end) break true;
+        } else false;
+    }
+};
+var fields = [_]Field{
     .{
         .name = "departure location",
         .ranges = .{
@@ -164,7 +274,7 @@ const fields = [_]Field{
 };
 
 const Ticket = [fields.len]usize;
-const your_ticket: Ticket = .{ 103, 79, 61, 97, 109, 67, 89, 83, 59, 53, 139, 131, 101, 113, 149, 127, 71, 73, 107, 137 };
+const your_ticket = Ticket{ 103, 79, 61, 97, 109, 67, 89, 83, 59, 53, 139, 131, 101, 113, 149, 127, 71, 73, 107, 137 };
 
 const nearby_tickets = [_]Ticket{
     .{ 473, 926, 599, 474, 412, 65, 885, 833, 533, 780, 539, 222, 177, 762, 132, 583, 414, 450, 177, 113 },
