@@ -22,19 +22,19 @@ pub fn main() !void {
 fn eval(stack: *std.ArrayList(Thunk), buf: []const u8) !Num {
     assert(stack.items.len == 0);
     var expecting: enum { Num, Op } = .Num;
-    var lhs: Num = 0;
-    var op: Op = add;
+    var mul: Num = 1;
+    var add: Num = 0;
     for (buf) |char| switch (expecting) {
         .Num => switch (char) {
             '0'...'9' => {
-                const rhs = char - '0';
-                lhs = op(lhs, rhs);
+                const num: Num = char - '0';
+                add += num;
                 expecting = .Op;
             },
             '(' => {
-                try stack.append(.{ .lhs = lhs, .op = op });
-                lhs = 0;
-                op = add;
+                try stack.append(.{ .mul = mul, .add = add });
+                mul = 1;
+                add = 0;
                 expecting = .Num;
             },
             ' ' => {},
@@ -42,16 +42,17 @@ fn eval(stack: *std.ArrayList(Thunk), buf: []const u8) !Num {
         },
         .Op => switch (char) {
             '+' => {
-                op = add;
                 expecting = .Num;
             },
             '*' => {
-                op = mul;
+                mul *= add;
+                add = 0;
                 expecting = .Num;
             },
             ')' => {
                 const thunk = stack.popOrNull() orelse return error.StackUnderflow;
-                lhs = thunk.op(thunk.lhs, lhs);
+                add = thunk.add + (mul * add);
+                mul = thunk.mul;
                 expecting = .Op;
             },
             ' ' => {},
@@ -60,16 +61,10 @@ fn eval(stack: *std.ArrayList(Thunk), buf: []const u8) !Num {
     };
     if (expecting != .Op) return error.IncompleteExpression;
     if (stack.items.len != 0) return error.IncompleteExpression;
-    return lhs;
+    return (mul * add);
 }
 
 const Num = u64;
-const Op = fn (lhs: Num, rhs: Num) Num;
-const Thunk = struct { lhs: Num, op: Op };
 
-fn add(lhs: Num, rhs: Num) Num {
-    return lhs + rhs;
-}
-fn mul(lhs: Num, rhs: Num) Num {
-    return lhs * rhs;
-}
+// A Thunk represents the computation "mul * (add + _)".
+const Thunk = struct { mul: Num, add: Num };
