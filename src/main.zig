@@ -5,30 +5,123 @@ var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
 const allocator = &arena.allocator;
 
 const input = @embedFile("../input.txt");
-const sea_monster = [3][20]u8{
-    "                  # ",
-    "#    ##    ##    ###",
-    " #  #  #  #  #  #   ",
+var sea_monster = init: {
+    var value: [3][20]u8 = undefined;
+    std.mem.copy(u8, &value[0], "                  # ");
+    std.mem.copy(u8, &value[1], "#    ##    ##    ###");
+    std.mem.copy(u8, &value[2], " #  #  #  #  #  #   ");
+    break :init value;
 };
 
 var tiles: [144]Tile = undefined;
 var edges = [_][2]?usize{[_]?usize{null} ** 2} ** 1024;
 
-//var image: [96][96]u8 = undefined;
-var image: [120][120]u8 = undefined;
+var image: [96][96]u8 = undefined;
 
 pub fn main() !void {
     try parseInput();
     assembleImage();
 
-    for (image) |row| {
-        for (row) |char| {
-            std.debug.print("{c}", .{char});
-        }
-        std.debug.print("\n", .{});
-    }
+    var before: usize = 0;
+    for (image) |row| for (row) |pixel| {
+        if (pixel == '#') before += 1;
+    };
 
-    try std.io.getStdOut().writer().print("{}\n", .{null});
+    searchAndReplace();
+    monster_mish();
+    searchAndReplace();
+    monster_mash();
+    searchAndReplace();
+    monster_mish();
+    searchAndReplace();
+    monster_mash();
+
+    var after: usize = 0;
+    for (image) |row| for (row) |pixel| {
+        if (pixel == '#') after += 1;
+    };
+
+    try std.io.getStdOut().writer().print("before: {}, after: {}.\n", .{ before, after });
+}
+
+// Reflects the monster about a horizontal axis.
+fn monster_mish() void {
+    var tmp: [20]u8 = sea_monster[0];
+    sea_monster[0] = sea_monster[2];
+    sea_monster[2] = tmp;
+}
+
+// Reflects the monster about a vertical axis.
+fn monster_mash() void {
+    var tmp: u8 = undefined;
+    var x: usize = 0;
+    while (x < 3) : (x += 1) {
+        var y: usize = 0;
+        while (y < 10) : (y += 1) {
+            tmp = sea_monster[x][y];
+            sea_monster[x][y] = sea_monster[x][19 - y];
+            sea_monster[x][19 - y] = tmp;
+        }
+    }
+}
+
+fn searchAndReplace() void {
+    var image_x: usize = 0;
+    // horizontal monsters
+    while (image_x < 96 - 3) : (image_x += 1) {
+        var image_y: usize = 0;
+        while (image_y < 96 - 20) : (image_y += 1) {
+            var found = true; // some wide-eyed optimism
+            var monster_x: usize = 0;
+            while (monster_x < 3) : (monster_x += 1) {
+                var monster_y: usize = 0;
+                while (monster_y < 20) : (monster_y += 1) {
+                    const image_pix = image[image_x + monster_x][image_y + monster_y];
+                    const monster_pix = sea_monster[monster_x][monster_y];
+                    if (image_pix == '.' and monster_pix == '#') found = false; // dashed hopes
+                }
+            }
+            if (found) {
+                monster_x = 0;
+                while (monster_x < 3) : (monster_x += 1) {
+                    var monster_y: usize = 0;
+                    while (monster_y < 20) : (monster_y += 1) {
+                        const monster_pix = sea_monster[monster_x][monster_y];
+                        if (monster_pix == '#')
+                            image[image_x + monster_x][image_y + monster_y] = 'O';
+                    }
+                }
+            }
+        }
+    }
+    // vertical monsters
+    image_x = 0;
+    while (image_x < 96 - 20) : (image_x += 1) {
+        var image_y: usize = 0;
+        while (image_y < 96 - 3) : (image_y += 1) {
+            var found = true; // more wide-eyed optimism
+            var monster_x: usize = 0;
+            while (monster_x < 3) : (monster_x += 1) {
+                var monster_y: usize = 0;
+                while (monster_y < 20) : (monster_y += 1) {
+                    const image_pix = image[image_x + monster_y][image_y + monster_x];
+                    const monster_pix = sea_monster[monster_x][monster_y];
+                    if (image_pix == '.' and monster_pix == '#') found = false; // hopes dashed again
+                }
+            }
+            if (found) {
+                monster_x = 0;
+                while (monster_x < 3) : (monster_x += 1) {
+                    var monster_y: usize = 0;
+                    while (monster_y < 20) : (monster_y += 1) {
+                        const monster_pix = sea_monster[monster_x][monster_y];
+                        if (monster_pix == '#')
+                            image[image_x + monster_y][image_y + monster_x] = 'O';
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn assembleImage() void {
@@ -76,24 +169,12 @@ fn assembleImage() void {
     }
 }
 
-//fn putTile(row: usize, col: usize, tile: Tile) void {
-//    var i: usize = 0;
-//    while (i < 8) : (i += 1) {
-//        var j: usize = 0;
-//        while (j < 8) : (j += 1) {
-//            image[8 * row + i][8 * col + j] = switch (tile.pixels[1 + i][1 + j]) {
-//                true => '#',
-//                false => '.',
-//            };
-//        }
-//    }
-//}
 fn putTile(row: usize, col: usize, tile: Tile) void {
     var i: usize = 0;
-    while (i < 10) : (i += 1) {
+    while (i < 8) : (i += 1) {
         var j: usize = 0;
-        while (j < 10) : (j += 1) {
-            image[10 * row + i][10 * col + j] = switch (tile.pixels[i][j]) {
+        while (j < 8) : (j += 1) {
+            image[8 * row + i][8 * col + j] = switch (tile.pixels[1 + i][1 + j]) {
                 true => '#',
                 false => '.',
             };
