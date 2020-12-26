@@ -14,11 +14,25 @@ pub fn main() !void {
     var valid: usize = 0;
     while (!input_parser.done()) {
         const message = try input_parser.parseMessage();
-        if (tree.parse(message)) valid += 1;
+        if (try tree.parse(message)) valid += 1;
     }
 
     try std.io.getStdOut().writer().print("{}\n", .{valid});
 }
+
+const Rule = struct {
+    const Id = u8;
+    const Concat = []const Id;
+    const Choice = []const Concat;
+    const Body = union(enum) {
+        literal: u8,
+        composite: Choice,
+    };
+    const Line = struct {
+        label: Id,
+        body: Body,
+    };
+};
 
 const InputParser = struct {
     const Self = @This();
@@ -65,40 +79,29 @@ const InputParser = struct {
         return result;
     }
 
-    const Id = u8;
-    const Concat = []const Id;
-    const Choice = []const Concat;
-    const Body = union(enum) {
-        literal: u8,
-        composite: Choice,
-    };
-    const RuleLine = struct {
-        label: Id,
-        body: Body,
-    };
-    fn parseRuleLine(self: *Self) !RuleLine {
+    fn parseRuleLine(self: *Self) !Rule.Line {
         const start = self.index;
         errdefer self.index = start;
 
-        const label = try self.parseNumber(Id);
+        const label = try self.parseNumber(Rule.Id);
         try self.parseLiteral(":");
 
         if (self.parseLiteral(" \"")) {
             const char = try self.parseChar();
             try self.parseLiteral("\"\n");
-            return RuleLine{
+            return Rule.Line{
                 .label = label,
                 .body = .{ .literal = char },
             };
         } else |_| {}
 
-        var choice = ArrayList(Concat).init(allocator);
+        var choice = ArrayList(Rule.Concat).init(allocator);
         defer choice.deinit();
-        var concat = ArrayList(Id).init(allocator);
+        var concat = ArrayList(Rule.Id).init(allocator);
         defer concat.deinit();
 
         while (self.parseLiteral(" ")) {
-            if (self.parseNumber(Id)) |id| {
+            if (self.parseNumber(Rule.Id)) |id| {
                 try concat.append(id);
             } else |_| {
                 try self.parseLiteral("|");
@@ -109,20 +112,20 @@ const InputParser = struct {
             try choice.append(concat.toOwnedSlice());
         }
 
-        return RuleLine{
+        return Rule.Line{
             .label = label,
             .body = .{ .composite = choice.toOwnedSlice() },
         };
     }
 
-    const Rules = []const ?Body;
+    const Rules = []const ?Rule.Body;
     fn parseRules(self: *Self) !Rules {
         const start = self.index;
         errdefer self.index = start;
 
-        var rules = try allocator.alloc(?Body, 256);
+        var rules = try allocator.alloc(?Rule.Body, 256);
         errdefer allocator.free(rules);
-        std.mem.set(?Body, rules, null);
+        std.mem.set(?Rule.Body, rules, null);
 
         while (self.parseRuleLine()) |rule| {
             if (rules[rule.label] != null) return error.ParseFail;
@@ -157,59 +160,59 @@ const Tree = struct {
     const Tree = @This();
 
     root: *TreeNode,
+    rules: InputParser.Rules,
 
     fn init(rules: InputParser.Rules) !Tree {
-        var stack = ArrayList(struct {
-            node: *TreeNode,
-            rule: InputParser.Id,
-        }).init(allocator);
-        defer stack.deinit();
-
         const root = try allocator.create(TreeNode);
-        try stack.append(.{ .node = root, .rule = 0 });
-        while (stack.popOrNull()) |cur| {
-            if (rules[cur.rule]) |body| switch (body) {
+        root.rule_id = 0;
+        return Tree{ .root = root, .rules = rules };
+    }
+
+    fn grow(self: Tree, node: *TreeNode) !void {
+        if (node.rule_id) |rule_id| {
+            node.rule_id = null;
+            if (self.rules[rule_id]) |body| switch (body) {
                 .literal => |char| {
-                    cur.node.actor = .{ .Literal = .{ .char = char } };
+                    node.actor = .{ .Literal = .{ .char = char } };
                 },
                 .composite => |choice| {
-                    cur.node.actor = .{ .Choice = .{ .end = choice.len } };
-                    cur.node.children = try allocator.alloc(TreeNode, choice.len);
-                    for (cur.node.children) |*child, child_id| {
+                    node.actor = .{ .Choice = .{ .end = choice.len } };
+                    node.children = try allocator.alloc(TreeNode, choice.len);
+                    for (node.children) |*child, child_id| {
                         const concat = choice[child_id];
-                        child.parent = .{ .node = cur.node, .child = child_id };
+                        child.parent = .{ .node = node, .child_id = child_id };
                         child.actor = .{ .Concat = .{ .end = concat.len } };
                         child.children = try allocator.alloc(TreeNode, concat.len);
                         for (child.children) |*grandchild, grandchild_id| {
-                            grandchild.parent = .{ .node = child, .child = grandchild_id };
-                            try stack.append(.{
-                                .node = grandchild,
-                                .rule = concat[grandchild_id],
-                            });
+                            grandchild.parent = .{ .node = child, .child_id = grandchild_id };
+                            grandchild.rule_id = concat[grandchild_id];
                         }
                     }
                 },
             } else return error.MissingRule;
-        }
-        return Tree{ .root = root };
+        } else return error.UnplannedGrowth;
     }
 
-    fn parse(self: Tree, text: []const u8) bool {
+    fn parse(self: Tree, text: []const u8) !bool {
         var node = self.root;
         var inbox: TreeNode.Inbox = .{ .src = null, .message = text };
         while (true) {
-            const outbox = node.actor.step(inbox);
-            if (outbox.dst) |dst| {
-                node = &node.children[dst];
-                inbox = .{ .src = null, .message = outbox.message };
-            } else if (node.parent) |parent| {
-                node = parent.node;
-                inbox = .{ .src = parent.child, .message = outbox.message };
-            } else if (outbox.message) |slice| {
-                if (slice.len == 0) return true;
-                inbox = .{ .src = null, .message = null };
+            if (node.actor) |*actor| {
+                const outbox = actor.step(inbox);
+                if (outbox.dst) |dst| {
+                    node = &node.children[dst];
+                    inbox = .{ .src = null, .message = outbox.message };
+                } else if (node.parent) |parent| {
+                    node = parent.node;
+                    inbox = .{ .src = parent.child_id, .message = outbox.message };
+                } else if (outbox.message) |slice| {
+                    if (slice.len == 0) return true;
+                    inbox = .{ .src = null, .message = null };
+                } else {
+                    return false;
+                }
             } else {
-                return false;
+                try self.grow(node);
             }
         }
     }
@@ -218,14 +221,15 @@ const Tree = struct {
 const TreeNode = struct {
     const TreeNode = @This();
 
-    const Id = usize;
+    const ChildId = usize;
     const Slice = []const u8;
-    const Inbox = struct { src: ?Id, message: ?Slice };
-    const Outbox = struct { dst: ?Id, message: ?Slice };
+    const Inbox = struct { src: ?ChildId, message: ?Slice };
+    const Outbox = struct { dst: ?ChildId, message: ?Slice };
 
-    parent: ?struct { node: *TreeNode, child: Id } = null,
+    parent: ?struct { node: *TreeNode, child_id: ChildId } = null,
+    rule_id: ?Rule.Id = null,
     children: []TreeNode = &[0]TreeNode{},
-    actor: union(enum) {
+    actor: ?union(enum) {
         const Actor = @This();
 
         fn step(self: *Actor, inbox: Inbox) Outbox {
@@ -259,28 +263,28 @@ const TreeNode = struct {
         Choice: struct {
             const Choice = @This();
 
-            end: Id,
-            child: Id = undefined,
+            end: ChildId,
+            active: ChildId = undefined,
             slice: Slice = undefined,
 
             fn step(self: *Choice, inbox: Inbox) Outbox {
                 if (inbox.src) |src| {
-                    assert(src == self.child);
+                    assert(src == self.active);
                     if (inbox.message) |slice| {
                         return Outbox{ .dst = null, .message = slice };
                     } else {
-                        self.child += 1;
+                        self.active += 1;
                     }
                 } else {
                     if (inbox.message) |slice| {
-                        self.child = 0;
+                        self.active = 0;
                         self.slice = slice;
                     } else {
-                        return Outbox{ .dst = self.child, .message = null };
+                        return Outbox{ .dst = self.active, .message = null };
                     }
                 }
-                return if (self.child < self.end)
-                    Outbox{ .dst = self.child, .message = self.slice }
+                return if (self.active < self.end)
+                    Outbox{ .dst = self.active, .message = self.slice }
                 else
                     Outbox{ .dst = null, .message = null };
             }
@@ -289,14 +293,14 @@ const TreeNode = struct {
         Concat: struct {
             const Concat = @This();
 
-            end: Id,
+            end: ChildId,
 
-            fn next(self: Concat, id: ?Id) ?Id {
+            fn next(self: Concat, id: ?ChildId) ?ChildId {
                 const child = if (id) |i| (i + 1) else 0;
                 return if (child < self.end) child else null;
             }
 
-            fn prev(self: Concat, id: ?Id) ?Id {
+            fn prev(self: Concat, id: ?ChildId) ?ChildId {
                 const child = id orelse self.end;
                 return if (child > 0) (child - 1) else null;
             }
