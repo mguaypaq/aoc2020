@@ -3,40 +3,106 @@ const assert = std.debug.assert;
 
 var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
 const allocator = &arena.allocator;
+
 const input = @embedFile("../input.txt");
+const sea_monster = [3][20]u8{
+    "                  # ",
+    "#    ##    ##    ###",
+    " #  #  #  #  #  #   ",
+};
+
+var tiles: [144]Tile = undefined;
+var edges = [_][2]?usize{[_]?usize{null} ** 2} ** 1024;
+
+//var image: [96][96]u8 = undefined;
+var image: [120][120]u8 = undefined;
 
 pub fn main() !void {
-    var input_parser = InputParser{};
+    try parseInput();
+    assembleImage();
 
-    var tiles = std.ArrayList(Tile).init(allocator);
-    while (!input_parser.done()) {
-        try tiles.append(try input_parser.parseTile());
-    }
-
-    var edge_mult = std.AutoHashMap(u32, u8).init(allocator);
-    for (tiles.items) |tile| {
-        for (tile.edges()) |edge| {
-            const entry = try edge_mult.getOrPutValue(normalize(edge), 0);
-            entry.value += 1;
+    for (image) |row| {
+        for (row) |char| {
+            std.debug.print("{c}", .{char});
         }
+        std.debug.print("\n", .{});
     }
 
-    var potential_corners: u8 = 0;
-    var product: u64 = 1;
-    for (tiles.items) |tile| {
+    try std.io.getStdOut().writer().print("{}\n", .{null});
+}
+
+fn assembleImage() void {
+    var vertical_edge: ?usize = null;
+    var horizontal_edges = [_]?usize{null} ** 12;
+
+    // Find top left corner.
+    var index: usize = for (tiles) |tile, index| {
         var unique_edges: u8 = 0;
         for (tile.edges()) |edge| {
-            const mult = edge_mult.get(normalize(edge)) orelse unreachable;
-            if (mult == 1) unique_edges += 1;
+            if (uniqueEdge(edge)) unique_edges += 1;
         }
-        if (unique_edges == 2) {
-            potential_corners += 1;
-            product *= tile.id;
+        if (unique_edges == 2) break index;
+    } else unreachable;
+    tiles[index].orient(vertical_edge, horizontal_edges[0]);
+    vertical_edge = tiles[index].right();
+    horizontal_edges[0] = tiles[index].bot();
+    deregisterEdges(index);
+    putTile(0, 0, tiles[index]);
+
+    // fill first row
+    var col: usize = 1;
+    while (col < 12) : (col += 1) {
+        index = edges[vertical_edge.?][0] orelse unreachable;
+        tiles[index].orient(vertical_edge, horizontal_edges[col]);
+        vertical_edge = tiles[index].right();
+        horizontal_edges[col] = tiles[index].bot();
+        deregisterEdges(index);
+        putTile(0, col, tiles[index]);
+    }
+
+    // fill subsequent rows
+    var row: usize = 1;
+    while (row < 12) : (row += 1) {
+        col = 0;
+        vertical_edge = null;
+        while (col < 12) : (col += 1) {
+            index = edges[horizontal_edges[col].?][0] orelse unreachable;
+            tiles[index].orient(vertical_edge, horizontal_edges[col]);
+            vertical_edge = tiles[index].right();
+            horizontal_edges[col] = tiles[index].bot();
+            deregisterEdges(index);
+            putTile(row, col, tiles[index]);
         }
     }
-    assert(potential_corners == 4);
+}
 
-    try std.io.getStdOut().writer().print("{}\n", .{product});
+//fn putTile(row: usize, col: usize, tile: Tile) void {
+//    var i: usize = 0;
+//    while (i < 8) : (i += 1) {
+//        var j: usize = 0;
+//        while (j < 8) : (j += 1) {
+//            image[8 * row + i][8 * col + j] = switch (tile.pixels[1 + i][1 + j]) {
+//                true => '#',
+//                false => '.',
+//            };
+//        }
+//    }
+//}
+fn putTile(row: usize, col: usize, tile: Tile) void {
+    var i: usize = 0;
+    while (i < 10) : (i += 1) {
+        var j: usize = 0;
+        while (j < 10) : (j += 1) {
+            image[10 * row + i][10 * col + j] = switch (tile.pixels[i][j]) {
+                true => '#',
+                false => '.',
+            };
+        }
+    }
+}
+
+fn uniqueEdge(edge: usize) bool {
+    return edges[edge][1] == null;
 }
 
 const Tile = struct {
@@ -45,35 +111,114 @@ const Tile = struct {
     id: Id,
     pixels: [10][10]bool,
 
-    fn edges(self: Tile) [4]u10 {
-        return [4]u10{
-            top: {
-                var edge: u10 = 0;
-                for (self.pixels[0]) |bit| edge = edge << 1 | @boolToInt(bit);
-                break :top edge;
-            },
-            bot: {
-                var edge: u10 = 0;
-                for (self.pixels[9]) |bit| edge = edge << 1 | @boolToInt(bit);
-                break :bot edge;
-            },
-            left: {
-                var edge: u10 = 0;
-                for (self.pixels) |row| edge = edge << 1 | @boolToInt(row[0]);
-                break :left edge;
-            },
-            right: {
-                var edge: u10 = 0;
-                for (self.pixels) |row| edge = edge << 1 | @boolToInt(row[9]);
-                break :right edge;
-            },
-        };
+    fn top(self: Tile) usize {
+        var edge: u10 = 0;
+        for (self.pixels[0]) |bit| edge = edge << 1 | @boolToInt(bit);
+        return normalize(edge);
+    }
+
+    fn bot(self: Tile) usize {
+        var edge: u10 = 0;
+        for (self.pixels[9]) |bit| edge = edge << 1 | @boolToInt(bit);
+        return normalize(edge);
+    }
+
+    fn left(self: Tile) usize {
+        var edge: u10 = 0;
+        for (self.pixels) |row| edge = edge << 1 | @boolToInt(row[0]);
+        return normalize(edge);
+    }
+
+    fn right(self: Tile) usize {
+        var edge: u10 = 0;
+        for (self.pixels) |row| edge = edge << 1 | @boolToInt(row[9]);
+        return normalize(edge);
+    }
+
+    fn edges(self: Tile) [4]usize {
+        return [4]usize{ self.top(), self.bot(), self.left(), self.right() };
+    }
+
+    fn normalize(edge: u10) usize {
+        const reverse = @bitReverse(u10, edge);
+        assert(edge != reverse);
+        return @as(usize, if (edge < reverse) edge else reverse);
+    }
+
+    /// Flips top edge and bottom edge.
+    fn flip(self: *Tile) void {
+        var tmp: [10]bool = undefined;
+        var i: usize = 0;
+        while (i < 5) : (i += 1) {
+            tmp = self.pixels[i];
+            self.pixels[i] = self.pixels[9 - i];
+            self.pixels[9 - i] = tmp;
+        }
+    }
+
+    /// Flips top edge and left edge.
+    fn flop(self: *Tile) void {
+        var tmp: bool = undefined;
+        var i: usize = 0;
+        while (i < 10) : (i += 1) {
+            var j: usize = 0;
+            while (j < 10) : (j += 1) {
+                if (i < j) {
+                    tmp = self.pixels[i][j];
+                    self.pixels[i][j] = self.pixels[j][i];
+                    self.pixels[j][i] = tmp;
+                }
+            }
+        }
+    }
+
+    fn match(unique_or_edge: ?usize, edge: usize) bool {
+        return if (unique_or_edge) |e|
+            (edge == e)
+        else
+            uniqueEdge(edge);
+    }
+
+    /// Rotates and flips the tile to match top edge and left edge constraints.
+    fn orient(self: *Tile, left_edge: ?usize, top_edge: ?usize) void {
+        while (true) {
+            if (match(left_edge, self.left()) and match(top_edge, self.top())) break;
+            self.flip();
+            if (match(left_edge, self.left()) and match(top_edge, self.top())) break;
+            self.flop();
+        }
     }
 };
 
-fn normalize(edge: u10) u32 {
-    const reverse = @bitReverse(u10, edge);
-    return @as(u32, if (edge < reverse) edge else reverse);
+fn registerEdges(index: usize) void {
+    const tile = tiles[index];
+    for (tile.edges()) |edge| {
+        for (edges[edge]) |*backref| {
+            assert(backref.* != index);
+            if (backref.* == null) {
+                backref.* = index;
+                break;
+            }
+        } else unreachable;
+    }
+}
+
+fn deregisterEdges(index: usize) void {
+    const tile = tiles[index];
+    for (tile.edges()) |edge| {
+        const pair = &edges[edge];
+        if (pair[0] == index) pair[0] = pair[1];
+        pair[1] = null;
+    }
+}
+
+fn parseInput() !void {
+    var input_parser = InputParser{};
+    for (tiles) |*tile, index| {
+        tile.* = try input_parser.parseTile();
+        registerEdges(index);
+    }
+    assert(input_parser.done());
 }
 
 const InputParser = struct {
