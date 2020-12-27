@@ -16,25 +16,47 @@ pub fn main() !void {
     try initEqual();
     applyLines();
     try deduce();
-    const count = try countSafe();
-    try std.io.getStdOut().writer().print("{}\n", .{count});
+
+    var unsafe = try allocator.alloc(Pair, allergenWords.items.len);
+    var index: usize = 0;
+    for (equal) |row, ingredient| {
+        for (row) |state, allergen| {
+            if (state == .yes) {
+                unsafe[index] = Pair{
+                    .ingredient = ingredient,
+                    .allergen = allergen,
+                };
+                index += 1;
+            }
+        }
+    }
+    assert(index == unsafe.len);
+
+    std.sort.sort(Pair, unsafe, {}, Pair.lessThan);
+
+    const writer = std.io.getStdOut().writer();
+    for (unsafe) |pair, pos| {
+        try writer.print("{}", .{ingredientWords.items[pair.ingredient]});
+        if (pos < unsafe.len - 1) {
+            try writer.print(",", .{});
+        } else {
+            try writer.print("\n", .{});
+        }
+    }
 }
 
-fn countSafe() !usize {
-    var ingredient_safe = try allocator.alloc(bool, ingredientWords.items.len);
-    defer allocator.free(ingredient_safe);
-    std.mem.set(bool, ingredient_safe, true);
+const Pair = struct {
+    ingredient: usize,
+    allergen: usize,
 
-    for (equal) |row, ingredient| for (row) |allergen_state| {
-        if (allergen_state != .no) ingredient_safe[ingredient] = false;
-    };
-
-    var count: usize = 0;
-    for (lines.items) |line| for (line.ingredients) |ingredient| {
-        if (ingredient_safe[ingredient]) count += 1;
-    };
-    return count;
-}
+    fn lessThan(context: void, lhs: Pair, rhs: Pair) bool {
+        return std.mem.lessThan(
+            u8,
+            allergenWords.items[lhs.allergen],
+            allergenWords.items[rhs.allergen],
+        );
+    }
+};
 
 fn deduce() !void {
     var allergen_matched = try allocator.alloc(bool, allergenWords.items.len);
