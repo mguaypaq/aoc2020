@@ -2,29 +2,33 @@ const std = @import("std");
 const assert = std.debug.assert;
 
 const input = "974618352"; // Manually translated to "cycle".
-var cycle = [10]usize{ undefined, 8, 9, 5, 6, 2, 1, 4, 3, 7 };
 
 fn prev(cup: usize) usize {
-    return if (cup == 1) 9 else (cup - 1);
+    return if (cup == 1) 1_000_000 else (cup - 1);
 }
 
 const writer = std.io.getStdOut().writer();
 
-fn print() !void {
-    var current: usize = 1;
-    var i: usize = 0;
-    while (i < 8) : (i += 1) {
-        current = cycle[current];
-        try writer.print("{d}", .{current});
-    } else {
-        try writer.print("\n", .{});
-    }
-}
-
 pub fn main() !void {
+    var cycle = try std.heap.page_allocator.alloc(usize, 1_000_001);
+    cycle[9] = 7;
+    cycle[7] = 4;
+    cycle[4] = 6;
+    cycle[6] = 1;
+    cycle[1] = 8;
+    cycle[8] = 3;
+    cycle[3] = 5;
+    cycle[5] = 2;
+    cycle[2] = 10;
+    var i: usize = 10;
+    while (i < 1_000_000) : (i += 1) {
+        cycle[i] = i + 1;
+    }
+    cycle[1_000_000] = 9;
+
     var current: usize = 9; // From the input.
-    var i: usize = 0;
-    while (i < 100) : (i += 1) {
+    i = 0;
+    while (i < 10_000_000) : (i += 1) {
         var destination = current;
         var third: usize = undefined;
         while (true) {
@@ -46,5 +50,5 @@ pub fn main() !void {
         current = cycle[current];
     }
 
-    try print();
+    try std.io.getStdOut().writer().print("{}\n", .{cycle[1] * cycle[cycle[1]]});
 }
