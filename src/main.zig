@@ -12,14 +12,18 @@ const public_keys = .{ 6930903, 19716708 };
 pub fn main() !void {
     const writer = std.io.getStdOut().writer();
 
-    assert(modulus < 10_000 * 10_000);
+    var order: u64 = modulus - 1;
+    try writer.print("{} factors as 1", .{order});
+
     var factor: u64 = 2;
-    while (factor < 10_000) : (factor += 1) {
-        if (modulus % factor == 0) {
-            try writer.print("{} is divisible by {}\n", .{modulus, factor});
-            break;
+    while (factor * factor < order) {
+        if (order % factor == 0) {
+            order /= factor;
+            try writer.print(" * {}", .{factor});
+        } else {
+            factor += 1;
         }
     } else {
-        try writer.print("{} is prime\n", .{modulus});
+        try writer.print(" * {}\n", .{order});
     }
 }
