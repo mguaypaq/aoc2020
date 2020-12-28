@@ -16,3 +16,7 @@ year, my intentions are to:
 [Advent of Code 2020]: <https://adventofcode.com/2020>
 [Zig]: <https://ziglang.org/>
 
+## Epilogue
+
+Success! This was a lot of fun (even though it was a lot of work),
+and I now feel much more comfortable coding in Zig.
