@@ -7,23 +7,28 @@ const allocator = &arena.allocator;
 
 const base = 7;
 const modulus = 20201227;
-const public_keys = .{ 6930903, 19716708 };
+const public_keys = [_]u64{ 6930903, 19716708 };
+const order = modulus - 1;
+const factors = [_]u64{ 2, 3, 29, 116099 };
 
 pub fn main() !void {
     const writer = std.io.getStdOut().writer();
 
-    var order: u64 = modulus - 1;
-    try writer.print("{} factors as 1", .{order});
-
-    var factor: u64 = 2;
-    while (factor * factor < order) {
-        if (order % factor == 0) {
-            order /= factor;
-            try writer.print(" * {}", .{factor});
-        } else {
-            factor += 1;
-        }
-    } else {
-        try writer.print(" * {}\n", .{order});
+    for (factors) |factor| {
+        try writer.print("{}\n", .{pow(order / factor)});
     }
+}
+
+// Compute `base` ** `exponent` % `modulus`.
+fn pow(exponent: u64) u64 {
+    var result: u64 = 1;
+    var cur_base: u64 = base;
+    var cur_exp = exponent;
+    while (cur_exp != 0) {
+        if (cur_exp & 1 == 1)
+            result = result * cur_base % modulus;
+        cur_base = cur_base * cur_base % modulus;
+        cur_exp >>= 1;
+    }
+    return result;
 }
