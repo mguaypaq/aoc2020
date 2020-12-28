@@ -6,18 +6,13 @@ const ArrayList = std.ArrayList;
 var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
 const allocator = &arena.allocator;
 
-const input = @embedFile("../test-input.txt");
+const input = @embedFile("../input.txt");
 
 pub fn main() !void {
     try parseInput();
-    const writer = std.io.getStdOut().writer();
-    try writer.print("Initial: {}\n", .{flipped_tiles.items.len});
     var day: usize = 0;
-    while (day < 100) {
-        day += 1;
-        try step();
-        try writer.print("Day {}: {}\n", .{ day, flipped_tiles.items.len });
-    }
+    while (day < 100) : (day += 1) try step();
+    try std.io.getStdOut().writer().print("{}\n", .{flipped_tiles.items.len});
 }
 
 fn step() !void {
